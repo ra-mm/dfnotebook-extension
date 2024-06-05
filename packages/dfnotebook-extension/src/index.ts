@@ -712,10 +712,11 @@ const ExportNotebook: JupyterFrontEndPlugin<void> = {
           comm.onMsg = (msg: any) => {
             var updated_notebook = msg.content.data.notebook;
             const data = new Blob([JSON.stringify(updated_notebook)], { type: 'application/json' });
+            const notebookName = notebook.context.localPath.split('/').pop()?.slice(0, -6);
             const url = URL.createObjectURL(data);
             const link = document.createElement('a');
             link.href = url;
-            link.download = 'notebook.ipynb';
+            link.download = notebookName +'_dfnb.ipynb';
             link.click();
           };
         }
