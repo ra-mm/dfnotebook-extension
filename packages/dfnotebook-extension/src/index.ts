@@ -28,7 +28,7 @@ import {
 } from '@jupyterlab/apputils';
 // FIXME Add back in when dfgraph is updated
 import { Graph, Manager as GraphManager, ViewerWidget } from '@dfnotebook/dfgraph';
-import { Cell, CodeCell, ICellModel, MarkdownCell } from '@jupyterlab/cells';
+import { Cell, CodeCell, CodeCellModel, ICellModel, MarkdownCell } from '@jupyterlab/cells';
 import { IEditorServices } from '@jupyterlab/codeeditor';
 import { IEditorExtensionRegistry } from '@jupyterlab/codemirror';
 import { ToolbarItems as DocToolbarItems } from '@jupyterlab/docmanager-extension';
@@ -285,6 +285,8 @@ namespace CommandIDs {
   export const tocRunCells = 'toc:run-cells';
 
   export const tagCell = 'notebook:tag-cell';
+
+  export const toggleInspectMode = 'jupyterlab-inspect:toggle';
 }
 
 /**
@@ -658,6 +660,103 @@ const cellToolbar: JupyterFrontEndPlugin<void> = {
   },
   optional: [ISettingRegistry, IToolbarWidgetRegistry, ITranslator]
 };
+
+const InspectNotebook: JupyterFrontEndPlugin<void> = {
+  id: 'jupyterlab-inspect',
+  autoStart: true,
+  requires: [ICommandPalette, INotebookTracker],
+  activate: (app: JupyterFrontEnd, palette: ICommandPalette, nbTrackers: INotebookTracker) => {
+    let inspectMode = false;
+    let inspectToggle: ToolbarButton | null = null;
+    console.log("Inspection button is available..");
+    let session: ISessionContext;
+    let activeCellSelected = false;
+    nbTrackers.widgetAdded.connect((sender, nbPanel) => {
+      session = nbPanel.sessionContext;
+      session.ready.then(() => {
+        if (session.session?.kernel?.name === 'dfpython3') {
+          inspectToggle = new ToolbarButton({
+            onClick: toggleInspectMode,
+            tooltip: 'Toggle Inspect Mode',
+            label: 'Inspect OFF'
+          });
+          nbPanel.toolbar.insertItem(15, 'Inspect', inspectToggle);
+
+          nbPanel.content.activeCellChanged.connect(() => {
+            if (inspectMode) {
+              const activeCell = nbPanel.content.activeCell;
+              if (activeCell && activeCell.model.type === 'code') {
+                const executionCount = (activeCell.model as CodeCellModel).id;
+                console.log('Execution Count:', executionCount);
+                console.log('Current Graph:', GraphManager)
+                const inputArea = activeCell.node.querySelector('.lm-Widget.jp-InputArea.jp-Cell-inputArea') as HTMLDivElement;
+                if (inputArea && activeCellSelected == false) {
+                  let celluuid = executionCount.substring(0, 8);
+                  let downlinks = GraphManager.graphs[GraphManager.currentGraph].downlinks[celluuid];
+                  let uplinks = GraphManager.graphs[GraphManager.currentGraph].uplinks[celluuid];
+                  let cells = GraphManager.graphs[GraphManager.currentGraph].cells;
+                  includeDependentCells(downlinks, cells, Object.keys(uplinks));
+                  inputArea.style.border = '3px dashed #176bbf';
+                  inputArea.style.borderRadius = '0.5pc';
+                  inputArea.style.padding = '4px';
+                  activeCellSelected = true;
+                }
+              }
+            }
+          });
+        }
+      });
+    });
+
+    function toggleInspectMode() {
+      const notebook = app.shell.currentWidget as NotebookPanel;
+      notebook.content.activeCellIndex = NaN;
+      if (notebook) {
+        inspectMode = !inspectMode;
+        if (inspectToggle) {
+          inspectToggle.dispose();
+
+          // Create a new button with the updated label
+          inspectToggle = new ToolbarButton({
+            onClick: toggleInspectMode,
+            tooltip: 'Toggle Inspect Mode',
+            label: inspectMode ? 'Inspect ON' : 'Inspect OFF'
+          });
+          notebook.toolbar.insertItem(15, 'Inspect', inspectToggle);
+        }
+
+        if (!inspectMode) {
+          const inputAreas = document.querySelectorAll('.lm-Widget.jp-InputArea.jp-Cell-inputArea');
+          inputAreas.forEach((inputArea: HTMLDivElement) => {
+            inputArea.style.border = 'none';
+            inputArea.style.borderRadius = '0';
+            inputArea.style.padding = '0'
+          });
+          activeCellSelected = false;
+        }
+      }
+    }
+
+    function includeDependentCells(downlinks:any, cells:any, uplinks: any){
+      const inputAreas = document.querySelectorAll('.lm-Widget.jp-InputArea.jp-Cell-inputArea');
+      inputAreas.forEach((inputArea: HTMLDivElement) => {
+        if(inputArea.innerText.length > 10){
+          var currCellId = inputArea.innerText.substring(1,9);
+          if (downlinks.includes(currCellId)){
+            inputArea.style.border = '3px dashed #ff7600';
+            inputArea.style.borderRadius = '0.5pc';
+            inputArea.style.padding = '4px'
+          }
+          else if (uplinks.includes(currCellId)){
+            inputArea.style.border = '3px dashed #de3459';
+            inputArea.style.borderRadius = '0.5pc';
+            inputArea.style.padding = '4px'
+          }
+        }
+      });
+    }
+  }
+};
     
 
 const plugins: JupyterFrontEndPlugin<any>[] = [
@@ -668,7 +767,8 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   cellToolbar,
   DepViewer,
   MiniMap,
-  GraphManagerPlugin
+  GraphManagerPlugin,
+  InspectNotebook
 ];
 export default plugins;
 
