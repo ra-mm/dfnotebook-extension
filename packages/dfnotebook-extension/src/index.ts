@@ -83,6 +83,7 @@ import {
 } from '@lumino/coreutils';
 import { DisposableSet } from '@lumino/disposable';
 import { Panel } from '@lumino/widgets';
+import { showErrorMessage } from '@jupyterlab/apputils';
 
 import {
   DataflowNotebookModel,
@@ -665,27 +666,43 @@ const ExportNotebook: JupyterFrontEndPlugin<void> = {
   autoStart: true,
   requires: [ICommandPalette, INotebookTracker],
   activate: (app: JupyterFrontEnd, palette: ICommandPalette, nbTrackers: INotebookTracker, rendermime: IRenderMimeRegistry) => {
-    let session: ISessionContext;
-    console.log("export-as-ipykernel-notebook is enabled");
-    nbTrackers.widgetAdded.connect((sender,nbPanel) => {
-      session = nbPanel.sessionContext;
-        session.ready.then(async () => {
-          var dfPackagesStatus = await dfPackages()
-          if(session.session?.kernel?.name == 'dfpython3' && (dfPackagesStatus as any)['dfconvert'] == true){
-              console.log("export-as-ipykernel-notebook is available");
-              const button = new ToolbarButton({
-                  className: 'export-as-ipykernel-notebook',
-                  label: 'Export as ipykernel notebook',
-                  onClick: exportAsIpyNotebook,
-                  tooltip: 'convert and export as ipykernel notebook',
-              });
-              nbPanel.toolbar.insertItem(10, 'Export as ipykernel notebook', button);
-          }
+    console.log("Export Option converting Dfnotebook to Ipykernel notebook is enabled");
+
+    // In the activate function:
+    nbTrackers.widgetAdded.connect((sender, nbPanel) => {
+      nbPanel.sessionContext.ready.then(() => {
+        addExportButton(nbPanel);
+        nbPanel.sessionContext.kernelChanged.connect(() => {
+          addExportButton(nbPanel);
         });
+      });
     });
 
-    async function dfPackages(){
-      let kernel = session.session?.kernel;
+    nbTrackers.currentChanged.connect((sender, nbPanel) => {
+      if (nbPanel) {
+        addExportButton(nbPanel);
+      }
+    });
+
+    function addExportButton(nbPanel: NotebookPanel) {
+      if (nbPanel.sessionContext.session?.kernel?.name === 'dfpython3') {
+        dfPackages(nbPanel).then((dfPackagesStatus: any) => {
+          if (dfPackagesStatus['dfconvert'] === true) {
+            console.log("export-as-ipykernel-notebook is available");
+            const button = new ToolbarButton({
+              className: 'export-as-ipykernel-notebook',
+              label: 'Export as ipykernel notebook',
+              onClick: () => exportAsIpyNotebook(nbPanel),
+              tooltip: 'convert and export as ipykernel notebook',
+            });
+            nbPanel.toolbar.insertItem(10, 'Export as ipykernel notebook', button);
+          }
+        });
+      }
+    }
+
+    async function dfPackages(nbPanel: NotebookPanel){
+      let kernel = nbPanel.sessionContext.session?.kernel;
       let result: JSONObject[] = [];
       if(kernel){
         let comm = kernel.createComm('dfpackages');
@@ -694,29 +711,35 @@ const ExportNotebook: JupyterFrontEndPlugin<void> = {
         comm.onMsg = msg =>
         resultPromise.resolve((msg.content.data.dfpackages as any) as JSONObject[]);
         result = await resultPromise.promise;
-        console.log('Recieved data', result);
       }
-      return result;//packageStatus;
+      return result;
     }
 
-    async function exportAsIpyNotebook(){
+    async function exportAsIpyNotebook(nbPanel: NotebookPanel){
       console.log('started exporting to Ipykernel Notebook!');          
       const notebook = app.shell.currentWidget as NotebookPanel;
       if (notebook) {
         const clonedModel = JSON.parse(JSON.stringify(notebook.model?.toJSON()));
-        const kernel = session.session?.kernel;
+        const kernel = nbPanel.sessionContext.session?.kernel;
         if(kernel){
           let comm = kernel.createComm('dfconvert');
           comm.open();
           comm.send({'notebook': clonedModel});
           comm.onMsg = (msg: any) => {
             var updated_notebook = msg.content.data.notebook;
+            if (!updated_notebook || Object.keys(updated_notebook).length === 0) {
+              showErrorMessage(
+                'Export Failed', 
+                'The notebook export was unsuccessful. Please reload the page and try again, or check your data for any issues.'
+              );
+              return;
+            }
             const data = new Blob([JSON.stringify(updated_notebook)], { type: 'application/json' });
             const notebookName = notebook.context.localPath.split('/').pop()?.slice(0, -6);
             const url = URL.createObjectURL(data);
             const link = document.createElement('a');
             link.href = url;
-            link.download = notebookName +'_dfnb.ipynb';
+            link.download = notebookName +'_ipy.ipynb';
             link.click();
           };
         }
@@ -735,8 +758,6 @@ const ExportNotebook: JupyterFrontEndPlugin<void> = {
 
   }
 };
-
-    
 
 const plugins: JupyterFrontEndPlugin<any>[] = [
   cellExecutor,
