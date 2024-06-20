@@ -434,7 +434,7 @@ const GraphManagerPlugin: JupyterFrontEndPlugin<void> = {
 
             nbPanel.content.activeCellChanged.connect(() =>{
                 let prevActive = GraphManager.getActive();
-                if(typeof prevActive == 'object'){
+                if(typeof prevActive == 'object' && prevActive.id != undefined ){
                     let uuid = prevActive.id.replace(/-/g, '').substr(0, 8);
                     if(prevActive.sharedModel.source != GraphManager.getText(uuid)){
                         GraphManager.markStale(uuid);

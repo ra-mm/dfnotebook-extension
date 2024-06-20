@@ -250,7 +250,7 @@ export namespace DataflowCodeCell {
           cellIdOutputsMap[cellId] = cellIdModelMap[cellId].outputs;
         }
       }
-
+      
       const msgPromise = DataflowOutputArea.execute(
         code,
         cell.outputArea,
@@ -343,6 +343,29 @@ export namespace DataflowCodeCell {
       let allUps = content.upstream_deps;
       let internalNodes = content.internal_nodes;
       let sessId = sessionContext.session.id;
+
+      //metadata
+      let uuid = model.id.substring(0,8)
+      let persistentCode = content.persistent_code[uuid] ?? {};
+      let identifier_refs = content.identifier_refs[uuid] ?? {};
+
+      //Set cell's metadata
+      if(content['status'] == 'ok'){
+        let cellOutputTags: any[] = [];
+        for (let i = 0; i < model.outputs.length; i++) {
+          let outputInfo = model?.outputs.get(i);
+          if (outputInfo && outputInfo.metadata && outputInfo.metadata.output_tag) {
+            cellOutputTags.push(outputInfo.metadata.output_tag);
+          }
+        }
+        model.setMetadata('persisted_code', persistentCode);
+        model.setMetadata('output_tags', cellOutputTags);
+        model.setMetadata('refs', identifier_refs);
+        console.log("persisted_code:", persistentCode)
+        console.log("output_tags:", cellOutputTags);
+        console.log('refs', identifier_refs);
+      }
+      
       //Set information about the graph based on sessionid
       GraphManager.graphs[sessId].updateCellContents(dfData?.code_dict);
       GraphManager.graphs[sessId].updateGraph(cells,nodes,uplinks,downlinks,`${cell.model.id.substr(0, 8) || ''}`,allUps,internalNodes);
