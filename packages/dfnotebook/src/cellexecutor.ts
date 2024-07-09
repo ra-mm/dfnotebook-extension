@@ -5,58 +5,12 @@ import {
   type ICodeCellModel,
   type MarkdownCell
 } from '@jupyterlab/cells';
-import type { Kernel, KernelMessage } from '@jupyterlab/services';
+import type { KernelMessage } from '@jupyterlab/services';
 import { nullTranslator } from '@jupyterlab/translation';
 import { findIndex } from '@lumino/algorithm';
 import { KernelError, INotebookModel, INotebookCellExecutor } from '@jupyterlab/notebook';
 import { DataflowCodeCell } from '@dfnotebook/dfcells';
 import { DataflowNotebookModel } from './model';
-
-// const handleComm = (msg: ICommMsgMsg<'iopub' | 'shell'>) => {
-//   // Handle the comm message here
-//   console.log('Received comm message:', msg);
-//   // Process the message as needed
-// };
-
-// Function to handle incoming comm messages
-// const handleCommMsg = (msg: KernelMessage.ICommMsgMsg) => {
-//   const content = msg.content.data;
-//   if (content && content.code_dict) {
-//     console.log('Received code_dict:', content.code_dict);
-//     for (const [key, value] of Object.entries(content.code_dict)) {
-//       console.log(`Key: ${key}, Value: ${value}`);
-//       // You can add additional processing here
-//     }
-//     // Process the code_dict as needed
-//   }
-//};
-
-const createHandleCommMsg = (notebook: any) => {
-  return (msg: KernelMessage.ICommMsgMsg) => {
-    const content = msg.content.data;
-    console.log(notebook)
-    if (content && content.code_dict && Object.keys(content.code_dict).length > 0) {
-      console.log('Received code_dict:', content.code_dict);
-      const cells = notebook.cells.model.cells;
-      for(let i=0;i<cells.length;i++){
-        var cell_id = notebook.cells.model.cells[i].id.substring(0,8)
-        if(notebook.cells.model.cells[i].cell_type == 'code' && content.code_dict.hasOwnProperty(cell_id)){
-          notebook.cells.model.cells[i].source = (content.code_dict as { [key: string]: any })[cell_id];
-          console.log('cell:', notebook.cells.model.cells[i]);
-          console.log('cell type:', notebook.cells.model.cells[i].cell_type);
-          console.log('cell source:', notebook.cells.model.cells[i].source);
-        }
-      }
-    }
-  };
-};
-
-// Function to handle opening new comm channels
-const handleCommOpen = (comm: Kernel.IComm, notebook:any) => {
-  //comm.onMsg = handleCommMsg;
-  comm.onMsg = createHandleCommMsg(notebook);
-  console.log('Comm opened:', comm);
-};
 
 /**
  * Run a single notebook cell.
@@ -64,7 +18,7 @@ const handleCommOpen = (comm: Kernel.IComm, notebook:any) => {
  * @param options Cell execution options
  * @returns Execution status
  */
-export async function runCell({
+  export async function runCell({
     cell,
     notebook,
     notebookConfig,
@@ -80,6 +34,13 @@ export async function runCell({
       case 'markdown':
         (cell as MarkdownCell).rendered = true;
         cell.inputHidden = false;
+        if(cell.model.metadata){
+          if(cell.model.metadata.persisted_code){
+            Object.keys(cell.model.metadata).forEach(key => {
+              cell.model.deleteMetadata(key);
+            });
+          }
+        }
         onCellExecuted({ cell, success: true });
         break;
       case 'code':
@@ -120,7 +81,6 @@ export async function runCell({
           }
   
           const deletedCells = notebook.deletedCells;
-
           onCellExecutionScheduled({ cell });
   
           let ran = false;
@@ -128,71 +88,10 @@ export async function runCell({
             let reply: KernelMessage.IExecuteReplyMsg | void;
             // !!! DATAFLOW NOTEBOOK CODE !!!
             if (notebook instanceof DataflowNotebookModel) {
-                const codeDict: { [key: string]: string } = {};
-                const persistedCode: { [key: string]: string } = {};
-                const cellIdModelMap: { [key: string]: any } = {};
-                const outputTags: { [key: string]: string[] } = {};
-                const inputTags: { [key: string]: string } = {};
-                const allRefs: { [key: string]: {[key: string] : string[]}} = {};
-                if (notebook) {
-                  for (let index = 0; index < notebook.cells.length; index++) {
-                    const cAny = notebook.cells.get(index);
-                    if (cAny.type === 'code') {
-                        const c = cAny as ICodeCellModel;
-                        // FIXME replace with utility function (see dfcells/widget)
-                        const cId = c.id.replace(/-/g, '').substring(0, 8);
-                        const inputTag = c.getMetadata('tag');
-                        if (inputTag) {
-                          // FIXME need to check for duplicates!
-                          inputTags[inputTag as string] = cId;
-                        }
-                        codeDict[cId] = c.sharedModel.getSource();
-                        cellIdModelMap[cId] = c;
-                        // let cellOutputTags: string[] = [];
-                        // for (let i = 0; i < c.outputs.length; ++i) {
-                        //   const out = c.outputs.get(i);
-                        //   if (out.metadata['output_tag']) {
-                        //       cellOutputTags.push(out.metadata['output_tag'] as string);
-                        //   }
-                        // }
-                        // outputTags[cId] = cellOutputTags;
-                        outputTags[cId] = c.getMetadata('output_tags')
-                        allRefs[cId] = c.getMetadata('refs');
-                        persistedCode[cId] = c.getMetadata('persisted_code')
-                    }
-                  };
-                }
-                // console.log('codeDict:', codeDict);
-                // console.log('cellIdWidgetMap:', cellIdWidgetMap);
-                // console.log('outputTags:', outputTags);
-                // console.log('inputTags:', inputTags);
-                //console.log('persisted code:', persistedCode)
-    
-                const dfData = {
-                    // FIXME replace with utility function (see dfcells/widget)
-                    uuid: cell.model.id.replace(/-/g, '').substring(0, 8) || '',
-                    code_dict: codeDict,
-                    output_tags: outputTags, // this.notebook.get_output_tags(Object.keys(code_dict)),
-                    input_tags: inputTags,
-                    auto_update_flags: {}, // this.notebook.get_auto_update_flags(),
-                    force_cached_flags: {}, // this.notebook.get_force_cached_flags()})
-                    all_refs: allRefs,
-                    persisted_code: persistedCode 
-                };
-
-                // const comm = sessionContext.session?.kernel?.createComm('dfcode');
-                // comm?.open()
-                if (sessionContext.session && sessionContext.session.kernel) {
-                  // Register a handler for comm open messages
-                  sessionContext.session.kernel.registerCommTarget('dfcode', (comm, msg) => {
-                    handleCommOpen(comm, notebook);
-                  });
-                }
-                // // Register the comm message handler
-                // if(comm){
-                //   comm.onMsg = handleComm;
-                // }
-
+                const cellUUID =  cell.model.id.replace(/-/g, '').substring(0, 8) || ''
+                let dfData = getdfData(notebook, cellUUID)
+                const currentOutputTags = dfData.dfMetadata['output_tags'];
+                
                 reply = await DataflowCodeCell.execute(
                     cell as DataflowCodeCell,
                     sessionContext,
@@ -200,10 +99,90 @@ export async function runCell({
                     deletedCells,
                     recordTiming: notebookConfig.recordTiming
                     },
-                    dfData,
-                    cellIdModelMap
-                );  
-            } else {
+                    dfData.dfMetadata,
+                    dfData.cellIdModelMap
+                );
+
+                const content = (reply?.content as any);
+                const all_tags: { [key: string]: string } = {}
+                for (let index = 0; index < notebook.cells.length; index++){
+                  const cAny = notebook.cells.get(index) as ICodeCellModel;
+                  if (notebook.cells.get(index).type === 'code') {
+                    const c = cAny as ICodeCellModel;
+                    const cId = c.id.replace(/-/g, '').substring(0, 8);
+                    if (c.getMetadata('tag')){
+                      all_tags[cId] = c.getMetadata('tag');
+                    }
+                  }
+                }
+
+
+                console.log("BEFORE NOTEBOOK:", notebook);
+                console.log('received after execution:', content);
+                //update of presisted code
+                if (content) {
+                  for (let index = 0; index < notebook.cells.length; index++){
+                    const cAny = notebook.cells.get(index) as ICodeCellModel;
+                    if (notebook.cells.get(index).type === 'code') {
+                      const c = cAny as ICodeCellModel;
+                      const cId = c.id.replace(/-/g, '').substring(0, 8);
+                      if(content.persistent_code[cId]){
+                        notebook.cells.get(index).setMetadata('persistentCode', content.persistent_code[cId]);
+                      }
+
+                      if(content.identifier_refs[cId]){
+                        let inputVarsMetadata = { 'ref': {}, 'tag_refs': {}};
+                        inputVarsMetadata.ref = content.identifier_refs[cId];
+                        
+                        let tag_refs: { [key: string]: string } = {}
+                        for (const ref_keys in content.identifier_refs[cId]){
+                          if(all_tags.hasOwnProperty(ref_keys)){
+                            tag_refs[ref_keys] = all_tags[ref_keys];
+                          }
+                        }
+                        inputVarsMetadata.tag_refs = tag_refs;
+                        notebook.cells.get(index).setMetadata('inputVars', inputVarsMetadata);
+                      }
+
+                      if(content.persistent_code[cId] || content.identifier_refs[cId]){
+                        let cellOutputTags: string[] = [];
+                        for (let i = 0; i < cAny.outputs.length; ++i) {
+                          const out = c.outputs.get(i);
+                          cellOutputTags.push(out.metadata['output_tag'] as string);
+                        }
+                        notebook.cells.get(index).setMetadata('outputVars', cellOutputTags);
+                      }
+                    }
+                  }
+                }
+                console.log("NOTEBOOK:", {notebook})
+
+                let comm = sessionContext.session?.kernel?.createComm('dfcode');
+                if (comm) {
+                  comm.open();
+                  dfData = getdfData(notebook, '');
+                  comm.send({
+                    'dfMetadata': dfData.dfMetadata,
+                    'current_output_tags': currentOutputTags
+                  });
+
+                  comm.onMsg = (msg) => {
+                    console.log('Received data CELL EXECUTOR:', msg.content.data);
+                    const content = msg.content.data;
+                    if (content && content.code_dict && Object.keys(content.code_dict).length > 0) {
+                      for (let index = 0; index < notebook.cells.length; index++){
+                        const cAny = notebook.cells.get(index) as ICodeCellModel;
+                        const cId = cAny.id.replace(/-/g, '').substring(0, 8);
+                        if(cAny.type == 'code' && content.code_dict.hasOwnProperty(cId)){
+                          notebook.cells.get(index).sharedModel.setSource((content.code_dict as { [key: string]: any })[cId]);
+                        }
+                      }
+                    }
+                    comm?.close();
+                  };
+                }
+            } 
+            else {
                 reply = await CodeCell.execute(
                 cell as CodeCell,
                 sessionContext,
@@ -264,6 +243,49 @@ export async function runCell({
     }
     
     return Promise.resolve(true);
+  }
+
+  export function getdfData(notebook: DataflowNotebookModel, cellUUID: string){
+    const codeDict: { [key: string]: string } = {};
+    const persistedCode: { [key: string]: string } = {};
+    const cellIdModelMap: { [key: string]: any } = {};
+    const outputTags: { [key: string]: string[] } = {};
+    const inputTags: { [key: string]: string } = {};
+    const allRefs: { [key: string]: {[key: string] : string[]}} = {};
+    if (notebook) {
+      for (let index = 0; index < notebook.cells.length; index++) {
+        const cAny = notebook.cells.get(index);
+        if (cAny.type === 'code') {
+            const c = cAny as ICodeCellModel;
+            // FIXME replace with utility function (see dfcells/widget)
+            const cId = c.id.replace(/-/g, '').substring(0, 8);
+            const inputTag = c.getMetadata('tag');
+            if (inputTag) {
+              // FIXME need to check for duplicates!
+              inputTags[inputTag as string] = cId;
+            }
+            codeDict[cId] = c.sharedModel.getSource();
+            cellIdModelMap[cId] = c;
+            outputTags[cId] = c.getMetadata('outputVars')
+            allRefs[cId] = c.getMetadata('inputVars');
+            persistedCode[cId] = c.getMetadata('persistentCode')
+        }
+      };
+    }
+  
+    const dfMetadata = {
+        // FIXME replace with utility function (see dfcells/widget)
+        uuid: cellUUID,
+        code_dict: codeDict,
+        output_tags: outputTags, // this.notebook.get_output_tags(Object.keys(code_dict)),
+        input_tags: inputTags,
+        auto_update_flags: {}, // this.notebook.get_auto_update_flags(),
+        force_cached_flags: {}, // this.notebook.get_force_cached_flags()})
+        all_refs: allRefs,
+        persisted_code: persistedCode 
+    };
+
+    return { dfMetadata, cellIdModelMap };
   }
   
   /**

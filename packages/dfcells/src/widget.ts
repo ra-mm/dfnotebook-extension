@@ -344,9 +344,6 @@ export namespace DataflowCodeCell {
       let allUps = content.upstream_deps;
       let internalNodes = content.internal_nodes;
       let sessId = sessionContext.session.id;
-      let uuid = model.id.substring(0,8)
-      let persistentCode = content.persistent_code[uuid] ?? {};
-      let identifier_refs = content.identifier_refs[uuid] ?? {};
       let graphUndefined = false;
 
       //Set cell's metadata
@@ -358,12 +355,6 @@ export namespace DataflowCodeCell {
             cellOutputTags.push(outputInfo.metadata.output_tag);
           }
         }
-        model.setMetadata('persisted_code', persistentCode);
-        model.setMetadata('output_tags', cellOutputTags);
-        model.setMetadata('refs', identifier_refs);
-        console.log("persisted_code:", persistentCode)
-        console.log("output_tags:", cellOutputTags);
-        console.log('refs', identifier_refs);
       }
       
       //Set information about the graph based on sessionid
@@ -378,7 +369,7 @@ export namespace DataflowCodeCell {
       }
 
        if (content.update_downstreams) {
-                    GraphManager.graphs[sessId].updateDownLinks(content.update_downstreams);
+          GraphManager.graphs[sessId].updateDownLinks(content.update_downstreams);
       }
 
       return msg;

@@ -27,7 +27,7 @@ import {
   Toolbar
 } from '@jupyterlab/apputils';
 import { Graph, Manager as GraphManager, ViewerWidget } from '@dfnotebook/dfgraph';
-import { Cell, CodeCell, ICellModel, MarkdownCell } from '@jupyterlab/cells';
+import { Cell, CodeCell, ICellModel, ICodeCellModel, MarkdownCell } from '@jupyterlab/cells';
 import { IEditorServices } from '@jupyterlab/codeeditor';
 import { IEditorExtensionRegistry } from '@jupyterlab/codemirror';
 import { ToolbarItems as DocToolbarItems } from '@jupyterlab/docmanager-extension';
@@ -87,7 +87,8 @@ import {
   DataflowNotebookModelFactory,
   DataflowNotebookPanel,
   DataflowNotebookWidgetFactory,
-  IDataflowNotebookWidgetFactory
+  IDataflowNotebookWidgetFactory,
+  getdfData
 } from '@dfnotebook/dfnotebook';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { IChangedArgs, PageConfig } from '@jupyterlab/coreutils';
@@ -95,6 +96,7 @@ import { DataflowInputArea } from '@dfnotebook/dfcells';
 
 import { cellExecutor } from './cellexecutor';
 import { CellBarExtension } from '@jupyterlab/cell-toolbar';
+import { Widget } from '@lumino/widgets';
 
 /**
  * The command IDs used by the notebook plugin.
@@ -283,7 +285,9 @@ namespace CommandIDs {
 
   export const tocRunCells = 'toc:run-cells';
 
-  export const tagCell = 'notebook:tag-cell';
+  export const addCellTag = 'notebook:add-cell-tag';
+
+  export const modifyCellTag = 'notebook:modify-cell-tag';
 }
 
 /**
@@ -2554,42 +2558,386 @@ function addCommands(
     }
   });
 
-  // !!! DATAFLOW NOTEBOOK CHANGE !!!
-  commands.addCommand(CommandIDs.tagCell, {
-    label: trans.__('Tag Cell'),
-    execute: args => {
+  commands.addCommand(CommandIDs.addCellTag, {
+    label: 'Add Cell Tag',
+    execute: async args => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
+      
+      const existingCellTags = new Set();
+      
+      let cells = tracker.currentWidget?.content.model?.cells;
+      if (cells){
+        for (let index = 0; index < cells.length; index++) {
+          existingCellTags.add(cells.get(index).metadata.tag);
+        }
+      }
 
       if (cell == null) {
         return;
       }
-
-      const inputArea = cell.inputArea as DataflowInputArea;
-
-      // Get value from user and check if it is 8 hex digits or follows pythonic identifier conventions.
-      // If it is 8 hex digits, it matches generated uuid, ask for different input.
-      // If it does not follow conventions, it can cause errors in the code so ask for different input.
-      // If cancel is hit, do not update the tag
+  
+      const inputArea = cell.inputArea as any;
+  
       const hexRegexp = new RegExp('^[0-9a-f]{8}$');
       const pythonVarRegexp = new RegExp('^[a-zA-Z0-9_]*$');
+  
+      // Function to create the dialog node
+      const createTagNode = (oldTag: string, errorMessage: string = ''): HTMLElement => {
+        const body = document.createElement('div');
+  
+        const input = document.createElement('input');
+        input.name = 'tag-name';
+        input.placeholder = 'Enter tag name';
+        input.style.margin = '10px 0 10px 0'; // Add some space below the input
+  
+        // const updateReferencesLabel = document.createElement('label');
+        // updateReferencesLabel.textContent = 'Update references';
+        // updateReferencesLabel.style.display = 'inline-block';
+        // updateReferencesLabel.style.verticalAlign = 'middle'; // Align the label with the checkbox
+      
+        // const updateReferencesCheckbox = document.createElement('input');
+        // updateReferencesCheckbox.name = 'update-references';
+        // updateReferencesCheckbox.type = 'checkbox';
+        // updateReferencesCheckbox.checked = true;
+        // updateReferencesCheckbox.style.verticalAlign = 'middle'; // Align the checkbox with the label
+        // updateReferencesCheckbox.style.marginTop = '6px'
 
-      let tagPrompt = 'Tag this cell:';
-      let tagValue = inputArea.tag; // populate with existing tag
-      do {
-        tagValue = prompt(tagPrompt, tagValue || '')
-        if (tagValue !== null) { // not a cancel
-          if (!pythonVarRegexp.test(tagValue))
-            tagPrompt = 'Invalid name (follow python identifier rules). Enter a valid tag:'
-          else if (hexRegexp.test(tagValue))
-            tagPrompt = 'Cell tags cannot be 8 hex values. Enter a valid tag:'
-          else { // update tag
-            inputArea.addTag(tagValue);
-            break
+        const message = document.createElement('div');
+        message.style.color = 'red';
+        message.style.marginTop = '10px';
+        message.id = 'error-message';
+        message.textContent = errorMessage;
+  
+        body.appendChild(input);
+        body.appendChild(document.createElement('br'));
+        //body.appendChild(updateReferencesLabel);
+        // body.appendChild(updateReferencesCheckbox);
+        body.appendChild(message);
+  
+        return body;
+      };
+      
+      //const showAddTagDialog = async (errorMessage: string = ''): Promise<{ newTag: string, updateReferences: boolean } | null> => {
+      const showAddTagDialog = async (errorMessage: string = ''): Promise<{ newTag: string } | null> => {
+        const dialogNode = createTagNode(inputArea.tag, errorMessage);
+        const widgetNode = new Widget();
+        widgetNode.node.appendChild(dialogNode);
+  
+        const result = await showDialog({
+          title: 'Add Cell Tag',
+          body: widgetNode,
+          buttons: [
+            Dialog.cancelButton(),
+            Dialog.okButton({ label: 'Add' })
+          ],
+          focusNodeSelector: 'input[name="tag-name"]',
+        });
+  
+        if (result.button.accept) {
+          const newTag = (dialogNode.querySelector('input[name="tag-name"]') as HTMLInputElement).value;
+          //const updateReferences = (dialogNode.querySelector('input[name="update-references"]') as HTMLInputElement).checked;
+
+          if (newTag.trim() === '') {
+            return await showAddTagDialog('Tag cannot be empty or whitespace. Enter a valid tag.');
+          } else if (!pythonVarRegexp.test(newTag)) {
+            return await showAddTagDialog('Invalid name (follow python identifier rules). Enter a valid tag.');
+          } else if (hexRegexp.test(newTag)) {
+            return await showAddTagDialog('Cell tags cannot be 8 hex values. Enter a valid tag.');
+          } else if (existingCellTags.has(newTag)){
+            return await showAddTagDialog('This tag already exists. Enter a different tag.');
+          } else {
+            //return { newTag, updateReferences };
+            return { newTag };
           }
         }
-      } while (tagValue !== null);
+        return null;
+      };
+  
+      const result = await showAddTagDialog();
+      const cellUUID = cell.model.id.replace(/-/g, '').substring(0, 8);
+      if (result) {
+        //const { newTag, updateReferences } = result;
+        const { newTag } = result;
+        inputArea.addTag(newTag);
+        if (newTag && tracker.currentWidget?.content.model) {
+          let dfData = getdfData(tracker.currentWidget.content.model as DataflowNotebookModel, '')
+          console.log('References to update.', newTag, dfData);
+          let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
+          let comm = tracker.currentWidget.sessionContext.session?.kernel?.createComm('dfcode');
+          if (comm) {
+            comm.open();
+            
+            comm.send({
+              'dfMetadata': dfData.dfMetadata,
+              'current_output_tags': {}
+            });
+            
+            comm.onMsg = (msg) => {
+              console.log('Received data:', msg.content.data);
+              const content = msg.content.data;
+              const all_tags: { [key: string]: string } = {}
+              for (let index = 0; index < notebook.cells.length; index++){
+                const cAny = notebook.cells.get(index) as ICodeCellModel;
+                if (notebook.cells.get(index).type === 'code') {
+                  const c = cAny as ICodeCellModel;
+                  const cId = c.id.replace(/-/g, '').substring(0, 8);
+                  if (c.getMetadata('tag')){
+                    all_tags[cId] = c.getMetadata('tag');
+                  }
+                }
+              }
+              if (content && content.code_dict && Object.keys(content.code_dict).length > 0) {
+                for (let index = 0; index < notebook.cells.length; index++){
+                  const cAny = notebook.cells.get(index) as ICodeCellModel;
+                  const cId = cAny.id.replace(/-/g, '').substring(0, 8);
+                  if(cAny.type == 'code' && content.code_dict.hasOwnProperty(cId)){
+                    notebook.cells.get(index).sharedModel.setSource((content.code_dict as { [key: string]: any })[cId]);
+                    
+                    let inputVarsMetadata = notebook.cells.get(index).sharedModel.metadata.inputVars;
+                    if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
+                      const refValue = inputVarsMetadata.ref as { [key: string]: any };
+                      const tagRefValue = inputVarsMetadata.tag_refs as { [key: string]: any };
+                      for(const ref_key in refValue){
+                        if(ref_key == cellUUID && all_tags.hasOwnProperty(ref_key)){
+                          tagRefValue[cellUUID] = all_tags[cellUUID];
+                        }
+                      }
+                      inputVarsMetadata = { 'ref': refValue, 'tag_refs': tagRefValue};
+                      notebook.cells.get(index).sharedModel.setMetadata('inputVars', inputVarsMetadata);
+                    }
+                  }
+                }
+              }
+              comm?.close();
+            };
+          }
+        }
+        console.log('Tag has been added.');
+      }
+    },
+    isEnabled: () => {
+      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
+      if(cell && cell.inputArea){
+        const inputArea = cell.inputArea as DataflowInputArea;
+        return cell ? !Boolean(inputArea.tag) : true;
+      }
+      return true;
     }
   });
+  
+  commands.addCommand(CommandIDs.modifyCellTag, {
+    label: 'Modify Cell Tag',
+    execute: async args => {
+      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
+      
+      const existingCellTags = new Set();
+      
+      let cells = tracker.currentWidget?.content.model?.cells;
+      if (cells){
+        for (let index = 0; index < cells.length; index++) {
+          existingCellTags.add(cells.get(index).metadata.tag);
+        }
+      }
+
+      if (cell == null) {
+        return;
+      }
+  
+      const inputArea = cell.inputArea as any; // Adjust according to your actual type
+  
+      if (!inputArea.tag) {
+        alert('This cell does not have a tag.');
+        return;
+      }
+  
+      const hexRegexp = new RegExp('^[0-9a-f]{8}$');
+      const pythonVarRegexp = new RegExp('^[a-zA-Z0-9_]*$');
+  
+      // Function to create the dialog node
+      const createRenameTagNode = (oldTag: string, errorMessage: string = ''): HTMLElement => {
+        const body = document.createElement('div');
+  
+        const inputLabel = document.createElement('label');
+        inputLabel.textContent = `Current Tag: ${oldTag}`;
+  
+        const input = document.createElement('input');
+        input.name = 'new-tag';
+        input.placeholder = 'Enter new tag';
+        input.style.margin = '10px 0 10px 0'; // Add some space below the input
+  
+        const updateReferencesLabel = document.createElement('label');
+        updateReferencesLabel.textContent = 'Update references';
+        updateReferencesLabel.style.display = 'inline-block';
+        updateReferencesLabel.style.verticalAlign = 'middle'; // Align the label with the checkbox
+      
+        const updateReferencesCheckbox = document.createElement('input');
+        updateReferencesCheckbox.name = 'update-references';
+        updateReferencesCheckbox.type = 'checkbox';
+        updateReferencesCheckbox.checked = true;
+        updateReferencesCheckbox.style.verticalAlign = 'middle'; // Align the checkbox with the label
+        updateReferencesCheckbox.style.marginTop = '6px'
+
+        const message = document.createElement('div');
+        message.style.color = 'red';
+        message.style.marginTop = '10px';
+        message.id = 'error-message';
+        message.textContent = errorMessage;
+  
+        body.appendChild(inputLabel);
+        body.appendChild(document.createElement('br'));
+        body.appendChild(input);
+        body.appendChild(document.createElement('br'));
+        body.appendChild(updateReferencesLabel);
+        body.appendChild(updateReferencesCheckbox);
+        body.appendChild(message);
+  
+        return body;
+      };
+  
+      const showModifyTagDialog = async (errorMessage: string = ''): Promise<{ newTag: string, updateReferences: boolean, existingTag: string } | null> => {
+        const dialogNode = createRenameTagNode(inputArea.tag, errorMessage);
+        const widgetNode = new Widget();
+        widgetNode.node.appendChild(dialogNode);
+        const existingTag = inputArea.tag;
+  
+        const result = await showDialog({
+          title: 'Modify Cell Tag',
+          body: widgetNode,
+          buttons: [
+            Dialog.cancelButton(),
+            Dialog.okButton({ label: 'Delete' }),
+            Dialog.okButton({ label: 'Modify' })
+          ],
+          focusNodeSelector: 'input[name="new-tag"]',
+        });
+  
+        if (result.button.accept) {
+          const newTag = (dialogNode.querySelector('input[name="new-tag"]') as HTMLInputElement).value;
+          const updateReferences = (dialogNode.querySelector('input[name="update-references"]') as HTMLInputElement).checked;
+          const deleteTag = result.button.label === 'Delete';
+
+          if (deleteTag) {
+            return { newTag: '', updateReferences, existingTag: '' };
+          }
+
+          if (newTag.trim() === '') {
+            return await showModifyTagDialog('Tag cannot be empty or whitespace. Enter a valid tag.');
+          } else if (!pythonVarRegexp.test(newTag)) {
+            return await showModifyTagDialog('Invalid name (follow python identifier rules). Enter a valid tag.');
+          } else if (hexRegexp.test(newTag)) {
+            return await showModifyTagDialog('Cell tags cannot be 8 hex values. Enter a valid tag.');
+          } else if (existingCellTags.has(newTag)){
+            return await showModifyTagDialog('This tag already exists. Enter a different tag.');
+          } else {
+            return { newTag, updateReferences, existingTag };
+          }
+        }
+        return null;
+      };
+  
+      const result = await showModifyTagDialog();
+      const cellUUID = cell.model.id.replace(/-/g, '').substring(0, 8);
+      if (result) {
+        const { newTag, updateReferences, existingTag } = result;
+        inputArea.addTag(newTag);
+        if (updateReferences && tracker.currentWidget?.content.model) {
+          let dfData = getdfData(tracker.currentWidget.content.model as DataflowNotebookModel, '')
+          console.log('References updated.', existingTag, newTag, dfData);
+          let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
+          let comm = tracker.currentWidget.sessionContext.session?.kernel?.createComm('dfcode');
+          if (comm) {
+            comm.open();
+            
+            comm.send({
+              'dfMetadata': dfData.dfMetadata,
+              'current_output_tags': {}
+            });
+            
+            comm.onMsg = (msg) => {
+              console.log('Received data:', msg.content.data);
+              const content = msg.content.data;
+              const all_tags: { [key: string]: string } = {}
+              for (let index = 0; index < notebook.cells.length; index++){
+                const cAny = notebook.cells.get(index) as ICodeCellModel;
+                if (notebook.cells.get(index).type === 'code') {
+                  const c = cAny as ICodeCellModel;
+                  const cId = c.id.replace(/-/g, '').substring(0, 8);
+                  if (c.getMetadata('tag')){
+                    all_tags[cId] = c.getMetadata('tag');
+                  }
+                }
+              }
+              if (content && content.code_dict && Object.keys(content.code_dict).length > 0) {
+                for (let index = 0; index < notebook.cells.length; index++){
+                  const cAny = notebook.cells.get(index) as ICodeCellModel;
+                  const cId = cAny.id.replace(/-/g, '').substring(0, 8);
+                  if(cAny.type == 'code' && content.code_dict.hasOwnProperty(cId)){
+                    notebook.cells.get(index).sharedModel.setSource((content.code_dict as { [key: string]: any })[cId]);
+                    let inputVarsMetadata = notebook.cells.get(index).sharedModel.metadata.inputVars;
+                    if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
+                      const refValue = inputVarsMetadata.ref as { [key: string]: any };
+                      const tagRefValue = inputVarsMetadata.tag_refs as { [key: string]: any };
+                      for(const ref_key in refValue){
+                        if(ref_key == cellUUID && all_tags.hasOwnProperty(ref_key)){
+                          tagRefValue[cellUUID] = all_tags[cellUUID];
+                        }
+                      }
+                      inputVarsMetadata = { 'ref': refValue, 'tag_refs': tagRefValue};
+                      notebook.cells.get(index).sharedModel.setMetadata('inputVars', inputVarsMetadata);
+                    }
+                  }
+                }
+              }
+              comm?.close();
+            };
+          }
+        }
+        else if(updateReferences == false && tracker.currentWidget?.content.model){
+          let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
+          
+          const all_tags: { [key: string]: string } = {}
+          for (let index = 0; index < notebook.cells.length; index++){
+            const cAny = notebook.cells.get(index) as ICodeCellModel;
+            if (notebook.cells.get(index).type === 'code') {
+              const c = cAny as ICodeCellModel;
+              const cId = c.id.replace(/-/g, '').substring(0, 8);
+              if (c.getMetadata('tag')){
+                all_tags[cId] = c.getMetadata('tag');
+              }
+            }
+          }
+          
+          for (let index = 0; index < notebook.cells.length; index++){
+            const cAny = notebook.cells.get(index) as ICodeCellModel;
+            if(cAny.type == 'code'){
+              let inputVarsMetadata = notebook.cells.get(index).sharedModel.metadata.inputVars;
+              if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
+                const refValue = inputVarsMetadata.ref as { [key: string]: any };
+                const tagRefValue: { [key: string]: any } = {};//= inputVarsMetadata.tag_refs as { [key: string]: any };
+                for(const ref_key in refValue){
+                  if(ref_key != cellUUID && all_tags.hasOwnProperty(ref_key)){
+                    tagRefValue[cellUUID] = all_tags[cellUUID];
+                  }
+                }
+                inputVarsMetadata = { 'ref': refValue, 'tag_refs': tagRefValue};
+                notebook.cells.get(index).sharedModel.setMetadata('inputVars', inputVarsMetadata);
+              }
+            }
+          }
+        }
+        console.log('Tag has been modified.');
+      }
+    },
+    isEnabled: () => {
+      const cell = tracker.currentWidget?.content.activeCell as CodeCell;
+      if(cell && cell.inputArea){
+        const inputArea = cell.inputArea as DataflowInputArea;
+        return cell ? Boolean(inputArea.tag) : false;
+      }
+      return false;
+    }
+  });
+  
   // !!! END DATAFLOW NOTEBOOK CHANGE !!!
 }
 
