@@ -90,7 +90,6 @@ import { DataflowNotebookModel } from './model';
             if (notebook instanceof DataflowNotebookModel) {
                 const cellUUID =  cell.model.id.replace(/-/g, '').substring(0, 8) || ''
                 let dfData = getdfData(notebook, cellUUID)
-                const currentOutputTags = dfData.dfMetadata['output_tags'];
                 
                 reply = await DataflowCodeCell.execute(
                     cell as DataflowCodeCell,
@@ -116,10 +115,6 @@ import { DataflowNotebookModel } from './model';
                   }
                 }
 
-
-                console.log("BEFORE NOTEBOOK:", notebook);
-                console.log('received after execution:', content);
-                //update of presisted code
                 if (content) {
                   for (let index = 0; index < notebook.cells.length; index++){
                     const cAny = notebook.cells.get(index) as ICodeCellModel;
@@ -155,19 +150,16 @@ import { DataflowNotebookModel } from './model';
                     }
                   }
                 }
-                console.log("NOTEBOOK:", {notebook})
 
                 let comm = sessionContext.session?.kernel?.createComm('dfcode');
                 if (comm) {
                   comm.open();
                   dfData = getdfData(notebook, '');
                   comm.send({
-                    'dfMetadata': dfData.dfMetadata,
-                    'current_output_tags': currentOutputTags
+                    'dfMetadata': dfData.dfMetadata
                   });
 
                   comm.onMsg = (msg) => {
-                    console.log('Received data CELL EXECUTOR:', msg.content.data);
                     const content = msg.content.data;
                     if (content && content.code_dict && Object.keys(content.code_dict).length > 0) {
                       for (let index = 0; index < notebook.cells.length; index++){
@@ -178,7 +170,6 @@ import { DataflowNotebookModel } from './model';
                         }
                       }
                     }
-                    comm?.close();
                   };
                 }
             } 

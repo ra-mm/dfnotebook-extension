@@ -2610,14 +2610,13 @@ function addCommands(
   
         body.appendChild(input);
         body.appendChild(document.createElement('br'));
-        //body.appendChild(updateReferencesLabel);
+        // body.appendChild(updateReferencesLabel);
         // body.appendChild(updateReferencesCheckbox);
         body.appendChild(message);
   
         return body;
       };
       
-      //const showAddTagDialog = async (errorMessage: string = ''): Promise<{ newTag: string, updateReferences: boolean } | null> => {
       const showAddTagDialog = async (errorMessage: string = ''): Promise<{ newTag: string } | null> => {
         const dialogNode = createTagNode(inputArea.tag, errorMessage);
         const widgetNode = new Widget();
@@ -2656,20 +2655,17 @@ function addCommands(
       const result = await showAddTagDialog();
       const cellUUID = cell.model.id.replace(/-/g, '').substring(0, 8);
       if (result) {
-        //const { newTag, updateReferences } = result;
         const { newTag } = result;
         inputArea.addTag(newTag);
         if (newTag && tracker.currentWidget?.content.model) {
           let dfData = getdfData(tracker.currentWidget.content.model as DataflowNotebookModel, '')
-          console.log('References to update.', newTag, dfData);
           let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
           let comm = tracker.currentWidget.sessionContext.session?.kernel?.createComm('dfcode');
           if (comm) {
             comm.open();
             
             comm.send({
-              'dfMetadata': dfData.dfMetadata,
-              'current_output_tags': {}
+              'dfMetadata': dfData.dfMetadata
             });
             
             comm.onMsg = (msg) => {
@@ -2708,7 +2704,6 @@ function addCommands(
                   }
                 }
               }
-              comm?.close();
             };
           }
         }
@@ -2794,12 +2789,11 @@ function addCommands(
         return body;
       };
   
-      const showModifyTagDialog = async (errorMessage: string = ''): Promise<{ newTag: string, updateReferences: boolean, existingTag: string } | null> => {
+      const showModifyTagDialog = async (errorMessage: string = ''): Promise<{ newTag: string, updateReferences: boolean } | null> => {
         const dialogNode = createRenameTagNode(inputArea.tag, errorMessage);
         const widgetNode = new Widget();
         widgetNode.node.appendChild(dialogNode);
-        const existingTag = inputArea.tag;
-  
+        
         const result = await showDialog({
           title: 'Modify Cell Tag',
           body: widgetNode,
@@ -2817,7 +2811,7 @@ function addCommands(
           const deleteTag = result.button.label === 'Delete';
 
           if (deleteTag) {
-            return { newTag: '', updateReferences, existingTag: '' };
+            return { newTag: '', updateReferences };
           }
 
           if (newTag.trim() === '') {
@@ -2829,7 +2823,7 @@ function addCommands(
           } else if (existingCellTags.has(newTag)){
             return await showModifyTagDialog('This tag already exists. Enter a different tag.');
           } else {
-            return { newTag, updateReferences, existingTag };
+            return { newTag, updateReferences };
           }
         }
         return null;
@@ -2838,19 +2832,17 @@ function addCommands(
       const result = await showModifyTagDialog();
       const cellUUID = cell.model.id.replace(/-/g, '').substring(0, 8);
       if (result) {
-        const { newTag, updateReferences, existingTag } = result;
+        const { newTag, updateReferences } = result;
         inputArea.addTag(newTag);
         if (updateReferences && tracker.currentWidget?.content.model) {
           let dfData = getdfData(tracker.currentWidget.content.model as DataflowNotebookModel, '')
-          console.log('References updated.', existingTag, newTag, dfData);
           let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
           let comm = tracker.currentWidget.sessionContext.session?.kernel?.createComm('dfcode');
           if (comm) {
             comm.open();
             
             comm.send({
-              'dfMetadata': dfData.dfMetadata,
-              'current_output_tags': {}
+              'dfMetadata': dfData.dfMetadata
             });
             
             comm.onMsg = (msg) => {
@@ -2888,7 +2880,6 @@ function addCommands(
                   }
                 }
               }
-              comm?.close();
             };
           }
         }
