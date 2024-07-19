@@ -628,7 +628,7 @@ const MiniMap: JupyterFrontEndPlugin<void> = {
           // Add the command to the palette.
           palette.addItem({ command, category: 'Tutorial' });
         }
-    };
+};
 
 
 const cellToolbar: JupyterFrontEndPlugin<void> = {
@@ -660,7 +660,102 @@ const cellToolbar: JupyterFrontEndPlugin<void> = {
   },
   optional: [ISettingRegistry, IToolbarWidgetRegistry, ITranslator]
 };
-    
+
+/**
+ * Map used to keep track of Tags toggle switch state across notebooks
+ */
+const notebookTagsVisibleMap = new Map<string, boolean>();
+
+/**
+ * Creates the toggle switch used for hiding/showing tags
+ */
+class ToggleTagsWidget extends Widget {
+  constructor(nbPanel: NotebookPanel, app: JupyterFrontEnd) {
+    super();
+    this.addClass('jupyter-toggle-switch-widget');
+
+    const containerDiv = document.createElement('div');
+    containerDiv.className = 'toggle-container';
+
+    const labelText = document.createElement('span');
+    labelText.textContent = 'Tags';
+    labelText.className = 'toggle-label';
+
+    const label = document.createElement('label');
+    label.className = 'switch';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = true;
+
+    const slider = document.createElement('span');
+    slider.className = 'slider round';
+
+    label.appendChild(input);
+    label.appendChild(slider);
+
+    containerDiv.appendChild(labelText);
+    containerDiv.appendChild(label);
+
+    const updateTooltip = (isChecked: boolean) => {
+      const tooltipText = isChecked ? `Toggle to hide the tags in the notebook`: `Toggle to show the tags in the notebook`;
+      label.title = tooltipText;
+      labelText.title = tooltipText;
+      slider.title = tooltipText;
+    };
+
+    updateTooltip(true);
+    updateNotebookCells(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext);
+
+    input.addEventListener('change', (event) => {
+      const isChecked = (event.target as HTMLInputElement).checked;
+      console.log(isChecked ? 'Tags are shown' : 'Tags are hidden');
+      updateTooltip(isChecked);
+      notebookTagsVisibleMap.set(nbPanel.id, isChecked);
+      const notebook = nbPanel.content
+
+      for (let index = 0; index < notebook.widgets.length; index++){
+        const cAny = notebook.widgets[index];
+        if (cAny.model.type == 'code' && cAny.model.metadata.tag){
+          const inputArea = (cAny as any).inputArea;
+          let currTag = cAny.model.metadata.tag;
+          if (isChecked){
+            inputArea.addTag(cAny.model.metadata.tag);
+          } else{
+            inputArea.addTag("");
+            cAny.model.setMetadata('tag', currTag);
+          }
+        }
+      }
+
+      nbPanel.model?.setMetadata("enable_tags", isChecked);
+      updateNotebookCells(nbPanel.model as DataflowNotebookModel, "", nbPanel.sessionContext, !isChecked);
+    });
+
+    this.node.appendChild(containerDiv);
+  }
+}
+
+/**
+ * Adds Tags toggle switch in frontend toolbar for dfkernels notebooks 
+ */
+const ToggleTags: JupyterFrontEndPlugin<void> = {
+  id: 'toggle-tags',
+  autoStart: true,
+  requires: [INotebookTracker],
+  activate: (app: JupyterFrontEnd, nbTrackers: INotebookTracker) => {
+    nbTrackers.widgetAdded.connect((sender,nbPanel) => {
+      const session = nbPanel.sessionContext;
+        session.ready.then(() => {
+          if(session.session?.kernel?.name == 'dfpython3'){
+            const toggleSwitch = new ToggleTagsWidget(nbPanel, app);        
+            nbPanel.toolbar.insertItem(12, 'customToggleTag', toggleSwitch);
+            notebookTagsVisibleMap.set(nbPanel.id, true);
+          }
+        });
+     });
+  }
+};
 
 const plugins: JupyterFrontEndPlugin<any>[] = [
   cellExecutor,
@@ -670,7 +765,8 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   cellToolbar,
   DepViewer,
   MiniMap,
-  GraphManagerPlugin
+  GraphManagerPlugin,
+  ToggleTags
 ];
 export default plugins;
 
@@ -2562,9 +2658,11 @@ function addCommands(
     label: 'Add Cell Tag',
     execute: async args => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      
+      if (cell == null) {
+        return;
+      }
+
       const existingCellTags = new Set();
-      
       let cells = tracker.currentWidget?.content.model?.cells;
       if (cells){
         for (let index = 0; index < cells.length; index++) {
@@ -2572,12 +2670,7 @@ function addCommands(
         }
       }
 
-      if (cell == null) {
-        return;
-      }
-  
-      const inputArea = cell.inputArea as any;
-  
+      const inputArea = cell.inputArea as any;  
       const hexRegexp = new RegExp('^[0-9a-f]{8}$');
       const pythonVarRegexp = new RegExp('^[a-zA-Z0-9_]*$');
   
@@ -2588,19 +2681,7 @@ function addCommands(
         const input = document.createElement('input');
         input.name = 'tag-name';
         input.placeholder = 'Enter tag name';
-        input.style.margin = '10px 0 10px 0'; // Add some space below the input
-  
-        // const updateReferencesLabel = document.createElement('label');
-        // updateReferencesLabel.textContent = 'Update references';
-        // updateReferencesLabel.style.display = 'inline-block';
-        // updateReferencesLabel.style.verticalAlign = 'middle'; // Align the label with the checkbox
-      
-        // const updateReferencesCheckbox = document.createElement('input');
-        // updateReferencesCheckbox.name = 'update-references';
-        // updateReferencesCheckbox.type = 'checkbox';
-        // updateReferencesCheckbox.checked = true;
-        // updateReferencesCheckbox.style.verticalAlign = 'middle'; // Align the checkbox with the label
-        // updateReferencesCheckbox.style.marginTop = '6px'
+        input.style.margin = '10px 0 10px 0';
 
         const message = document.createElement('div');
         message.style.color = 'red';
@@ -2610,8 +2691,6 @@ function addCommands(
   
         body.appendChild(input);
         body.appendChild(document.createElement('br'));
-        // body.appendChild(updateReferencesLabel);
-        // body.appendChild(updateReferencesCheckbox);
         body.appendChild(message);
   
         return body;
@@ -2634,8 +2713,6 @@ function addCommands(
   
         if (result.button.accept) {
           const newTag = (dialogNode.querySelector('input[name="tag-name"]') as HTMLInputElement).value;
-          //const updateReferences = (dialogNode.querySelector('input[name="update-references"]') as HTMLInputElement).checked;
-
           if (newTag.trim() === '') {
             return await showAddTagDialog('Tag cannot be empty or whitespace. Enter a valid tag.');
           } else if (!pythonVarRegexp.test(newTag)) {
@@ -2645,7 +2722,6 @@ function addCommands(
           } else if (existingCellTags.has(newTag)){
             return await showAddTagDialog('This tag already exists. Enter a different tag.');
           } else {
-            //return { newTag, updateReferences };
             return { newTag };
           }
         }
@@ -2658,65 +2734,20 @@ function addCommands(
         const { newTag } = result;
         inputArea.addTag(newTag);
         if (newTag && tracker.currentWidget?.content.model) {
-          let dfData = getdfData(tracker.currentWidget.content.model as DataflowNotebookModel, '')
           let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
-          let comm = tracker.currentWidget.sessionContext.session?.kernel?.createComm('dfcode');
-          if (comm) {
-            comm.open();
-            
-            comm.send({
-              'dfMetadata': dfData.dfMetadata
-            });
-            
-            comm.onMsg = (msg) => {
-              console.log('Received data:', msg.content.data);
-              const content = msg.content.data;
-              const all_tags: { [key: string]: string } = {}
-              for (let index = 0; index < notebook.cells.length; index++){
-                const cAny = notebook.cells.get(index) as ICodeCellModel;
-                if (notebook.cells.get(index).type === 'code') {
-                  const c = cAny as ICodeCellModel;
-                  const cId = c.id.replace(/-/g, '').substring(0, 8);
-                  if (c.getMetadata('tag')){
-                    all_tags[cId] = c.getMetadata('tag');
-                  }
-                }
-              }
-              if (content && content.code_dict && Object.keys(content.code_dict).length > 0) {
-                for (let index = 0; index < notebook.cells.length; index++){
-                  const cAny = notebook.cells.get(index) as ICodeCellModel;
-                  const cId = cAny.id.replace(/-/g, '').substring(0, 8);
-                  if(cAny.type == 'code' && content.code_dict.hasOwnProperty(cId)){
-                    notebook.cells.get(index).sharedModel.setSource((content.code_dict as { [key: string]: any })[cId]);
-                    
-                    let inputVarsMetadata = notebook.cells.get(index).sharedModel.metadata.inputVars;
-                    if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
-                      const refValue = inputVarsMetadata.ref as { [key: string]: any };
-                      const tagRefValue = inputVarsMetadata.tag_refs as { [key: string]: any };
-                      for(const ref_key in refValue){
-                        if(ref_key == cellUUID && all_tags.hasOwnProperty(ref_key)){
-                          tagRefValue[cellUUID] = all_tags[cellUUID];
-                        }
-                      }
-                      inputVarsMetadata = { 'ref': refValue, 'tag_refs': tagRefValue};
-                      notebook.cells.get(index).sharedModel.setMetadata('inputVars', inputVarsMetadata);
-                    }
-                  }
-                }
-              }
-            };
-          }
+          updateNotebookCells(notebook, cellUUID, tracker.currentWidget.sessionContext)
         }
         console.log('Tag has been added.');
       }
     },
     isEnabled: () => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      if(cell && cell.inputArea){
+      const isTagsVisible = tracker.currentWidget?.id ? (notebookTagsVisibleMap.get(tracker.currentWidget.id) || false) : false;
+      if(cell && cell.model.type == 'code' && cell.inputArea){
         const inputArea = cell.inputArea as DataflowInputArea;
-        return cell ? !Boolean(inputArea.tag) : true;
+        return (cell ? !Boolean(inputArea.tag) : true) && isTagsVisible;
       }
-      return true;
+      return false;
     }
   });
   
@@ -2724,9 +2755,8 @@ function addCommands(
     label: 'Modify Cell Tag',
     execute: async args => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      
       const existingCellTags = new Set();
-      
+
       let cells = tracker.currentWidget?.content.model?.cells;
       if (cells){
         for (let index = 0; index < cells.length; index++) {
@@ -2738,7 +2768,7 @@ function addCommands(
         return;
       }
   
-      const inputArea = cell.inputArea as any; // Adjust according to your actual type
+      const inputArea = cell.inputArea as any;
   
       if (!inputArea.tag) {
         alert('This cell does not have a tag.');
@@ -2758,18 +2788,18 @@ function addCommands(
         const input = document.createElement('input');
         input.name = 'new-tag';
         input.placeholder = 'Enter new tag';
-        input.style.margin = '10px 0 10px 0'; // Add some space below the input
+        input.style.margin = '10px 0 10px 0';
   
         const updateReferencesLabel = document.createElement('label');
         updateReferencesLabel.textContent = 'Update references';
         updateReferencesLabel.style.display = 'inline-block';
-        updateReferencesLabel.style.verticalAlign = 'middle'; // Align the label with the checkbox
+        updateReferencesLabel.style.verticalAlign = 'middle';
       
         const updateReferencesCheckbox = document.createElement('input');
         updateReferencesCheckbox.name = 'update-references';
         updateReferencesCheckbox.type = 'checkbox';
         updateReferencesCheckbox.checked = true;
-        updateReferencesCheckbox.style.verticalAlign = 'middle'; // Align the checkbox with the label
+        updateReferencesCheckbox.style.verticalAlign = 'middle';
         updateReferencesCheckbox.style.marginTop = '6px'
 
         const message = document.createElement('div');
@@ -2834,60 +2864,15 @@ function addCommands(
       if (result) {
         const { newTag, updateReferences } = result;
         inputArea.addTag(newTag);
+
         if (updateReferences && tracker.currentWidget?.content.model) {
-          let dfData = getdfData(tracker.currentWidget.content.model as DataflowNotebookModel, '')
           let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
-          let comm = tracker.currentWidget.sessionContext.session?.kernel?.createComm('dfcode');
-          if (comm) {
-            comm.open();
-            
-            comm.send({
-              'dfMetadata': dfData.dfMetadata
-            });
-            
-            comm.onMsg = (msg) => {
-              console.log('Received data:', msg.content.data);
-              const content = msg.content.data;
-              const all_tags: { [key: string]: string } = {}
-              for (let index = 0; index < notebook.cells.length; index++){
-                const cAny = notebook.cells.get(index) as ICodeCellModel;
-                if (notebook.cells.get(index).type === 'code') {
-                  const c = cAny as ICodeCellModel;
-                  const cId = c.id.replace(/-/g, '').substring(0, 8);
-                  if (c.getMetadata('tag')){
-                    all_tags[cId] = c.getMetadata('tag');
-                  }
-                }
-              }
-              if (content && content.code_dict && Object.keys(content.code_dict).length > 0) {
-                for (let index = 0; index < notebook.cells.length; index++){
-                  const cAny = notebook.cells.get(index) as ICodeCellModel;
-                  const cId = cAny.id.replace(/-/g, '').substring(0, 8);
-                  if(cAny.type == 'code' && content.code_dict.hasOwnProperty(cId)){
-                    notebook.cells.get(index).sharedModel.setSource((content.code_dict as { [key: string]: any })[cId]);
-                    let inputVarsMetadata = notebook.cells.get(index).sharedModel.metadata.inputVars;
-                    if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
-                      const refValue = inputVarsMetadata.ref as { [key: string]: any };
-                      const tagRefValue = inputVarsMetadata.tag_refs as { [key: string]: any };
-                      for(const ref_key in refValue){
-                        if(ref_key == cellUUID && all_tags.hasOwnProperty(ref_key)){
-                          tagRefValue[cellUUID] = all_tags[cellUUID];
-                        }
-                      }
-                      inputVarsMetadata = { 'ref': refValue, 'tag_refs': tagRefValue};
-                      notebook.cells.get(index).sharedModel.setMetadata('inputVars', inputVarsMetadata);
-                    }
-                  }
-                }
-              }
-            };
-          }
-        }
-        else if(updateReferences == false && tracker.currentWidget?.content.model){
+          updateNotebookCells(notebook, cellUUID, tracker.currentWidget.sessionContext)
+        } else if (updateReferences == false && tracker.currentWidget?.content.model) {
           let notebook = tracker.currentWidget.content.model as DataflowNotebookModel;
-          
-          const all_tags: { [key: string]: string } = {}
-          for (let index = 0; index < notebook.cells.length; index++){
+          const all_tags: { [key: string]: string } = {};
+
+          for (let index = 0; index < notebook.cells.length; index++) {
             const cAny = notebook.cells.get(index) as ICodeCellModel;
             if (notebook.cells.get(index).type === 'code') {
               const c = cAny as ICodeCellModel;
@@ -2898,16 +2883,16 @@ function addCommands(
             }
           }
           
-          for (let index = 0; index < notebook.cells.length; index++){
+          for (let index = 0; index < notebook.cells.length; index++) {
             const cAny = notebook.cells.get(index) as ICodeCellModel;
-            if(cAny.type == 'code'){
+            if (cAny.type == 'code') {
               let inputVarsMetadata = notebook.cells.get(index).sharedModel.metadata.inputVars;
               if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
                 const refValue = inputVarsMetadata.ref as { [key: string]: any };
-                const tagRefValue: { [key: string]: any } = {};//= inputVarsMetadata.tag_refs as { [key: string]: any };
-                for(const ref_key in refValue){
-                  if(ref_key != cellUUID && all_tags.hasOwnProperty(ref_key)){
-                    tagRefValue[cellUUID] = all_tags[cellUUID];
+                const tagRefValue: { [key: string]: any } = {};
+                for (const ref_key in refValue) {
+                  if (ref_key != cellUUID && all_tags.hasOwnProperty(ref_key)) {
+                    tagRefValue[ref_key] = all_tags[ref_key];
                   }
                 }
                 inputVarsMetadata = { 'ref': refValue, 'tag_refs': tagRefValue};
@@ -2921,15 +2906,73 @@ function addCommands(
     },
     isEnabled: () => {
       const cell = tracker.currentWidget?.content.activeCell as CodeCell;
-      if(cell && cell.inputArea){
+      const isTagsVisible = tracker.currentWidget?.id ? (notebookTagsVisibleMap.get(tracker.currentWidget.id) || false) : false;
+      if (cell && cell.model.type == 'code' && cell.inputArea) {
         const inputArea = cell.inputArea as DataflowInputArea;
-        return cell ? Boolean(inputArea.tag) : false;
+        return (cell ? Boolean(inputArea.tag) : false) && isTagsVisible;
       }
       return false;
     }
   });
   
   // !!! END DATAFLOW NOTEBOOK CHANGE !!!
+}
+
+/**
+ * Update code based on add, delete or modified tag value
+ */
+
+function updateNotebookCells(notebook: DataflowNotebookModel, cellUUID: string, sessionContext: ISessionContext, hideTags: boolean=false) {
+  let dfData = getdfData(notebook, '')
+  let comm = sessionContext.session?.kernel?.createComm('dfcode');
+  if (comm) {
+    comm.open();
+
+    if (hideTags) {
+      dfData.dfMetadata.input_tags = {};
+    }
+
+    comm.send({
+      'dfMetadata': dfData.dfMetadata
+    });
+    
+    comm.onMsg = (msg) => {
+      const content = msg.content.data;
+      const all_tags: { [key: string]: string } = {}
+      for (let index = 0; index < notebook.cells.length; index++) {
+        const cAny = notebook.cells.get(index) as ICodeCellModel;
+        if (notebook.cells.get(index).type === 'code') {
+          const c = cAny as ICodeCellModel;
+          const cId = c.id.replace(/-/g, '').substring(0, 8);
+          if (c.getMetadata('tag')) {
+            all_tags[cId] = c.getMetadata('tag');
+          }
+        }
+      }
+      
+      for (let index = 0; index < notebook.cells.length; index++){
+        const cAny = notebook.cells.get(index) as ICodeCellModel;
+        const cId = cAny.id.replace(/-/g, '').substring(0, 8);
+        if (cAny.type == 'code') {
+          if(content.code_dict?.hasOwnProperty(cId)){
+            notebook.cells.get(index).sharedModel.setSource((content.code_dict as { [key: string]: any })[cId]);
+          }
+          let inputVarsMetadata = notebook.cells.get(index).sharedModel.metadata.inputVars;
+          if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
+            const refValue = inputVarsMetadata.ref as { [key: string]: any };
+            let tagRefValue = inputVarsMetadata.tag_refs as { [key: string]: any };
+            for (const ref_key in refValue) {
+              if (!hideTags && cellUUID && ref_key == cellUUID && all_tags.hasOwnProperty(ref_key)) {
+                tagRefValue[cellUUID] = all_tags[cellUUID];
+              }
+            }
+            inputVarsMetadata = { 'ref': refValue, 'tag_refs': tagRefValue };
+            notebook.cells.get(index).sharedModel.setMetadata('inputVars', inputVarsMetadata);
+          }
+        }
+      }
+    };
+  }
 }
 
 /**

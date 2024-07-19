@@ -90,6 +90,10 @@ import { DataflowNotebookModel } from './model';
             if (notebook instanceof DataflowNotebookModel) {
                 const cellUUID =  cell.model.id.replace(/-/g, '').substring(0, 8) || ''
                 let dfData = getdfData(notebook, cellUUID)
+
+                if(!notebook.getMetadata('enable_tags')){
+                  dfData.dfMetadata.input_tags={};
+                }
                 
                 reply = await DataflowCodeCell.execute(
                     cell as DataflowCodeCell,
@@ -155,6 +159,9 @@ import { DataflowNotebookModel } from './model';
                 if (comm) {
                   comm.open();
                   dfData = getdfData(notebook, '');
+                  if(!notebook.getMetadata('enable_tags')){
+                    dfData.dfMetadata.input_tags={};
+                  }
                   comm.send({
                     'dfMetadata': dfData.dfMetadata
                   });
