@@ -34,13 +34,6 @@ import { DataflowNotebookModel } from './model';
       case 'markdown':
         (cell as MarkdownCell).rendered = true;
         cell.inputHidden = false;
-        if(cell.model.metadata){
-          if(cell.model.metadata.persisted_code){
-            Object.keys(cell.model.metadata).forEach(key => {
-              cell.model.deleteMetadata(key);
-            });
-          }
-        }
         onCellExecuted({ cell, success: true });
         break;
       case 'code':
@@ -107,26 +100,29 @@ import { DataflowNotebookModel } from './model';
                 );
 
                 const content = (reply?.content as any);
-                const all_tags: { [key: string]: string } = {}
-                for (let index = 0; index < notebook.cells.length; index++){
-                  const cAny = notebook.cells.get(index) as ICodeCellModel;
-                  if (notebook.cells.get(index).type === 'code') {
-                    const c = cAny as ICodeCellModel;
-                    const cId = c.id.replace(/-/g, '').substring(0, 8);
-                    if (c.getMetadata('tag')){
-                      all_tags[cId] = c.getMetadata('tag');
-                    }
-                  }
-                }
-
+                
                 if (content) {
+                  const all_tags: { [key: string]: string } = {}
                   for (let index = 0; index < notebook.cells.length; index++){
                     const cAny = notebook.cells.get(index) as ICodeCellModel;
                     if (notebook.cells.get(index).type === 'code') {
                       const c = cAny as ICodeCellModel;
                       const cId = c.id.replace(/-/g, '').substring(0, 8);
+                      const dfmetadata = c.getMetadata('dfmetadata');
+                      if (dfmetadata && dfmetadata.tag){
+                        all_tags[cId] = dfmetadata.tag;
+                      }
+                    }
+                  }
+
+                  for (let index = 0; index < notebook.cells.length; index++){
+                    const cAny = notebook.cells.get(index) as ICodeCellModel;
+                    if (notebook.cells.get(index).type === 'code') {
+                      const c = cAny as ICodeCellModel;
+                      const cId = c.id.replace(/-/g, '').substring(0, 8);
+                      const dfmetadata = c.getMetadata('dfmetadata');
                       if(content.persistent_code[cId]){
-                        notebook.cells.get(index).setMetadata('persistentCode', content.persistent_code[cId]);
+                        dfmetadata.persistentCode = content.persistent_code[cId];
                       }
 
                       if(content.identifier_refs[cId]){
@@ -140,7 +136,7 @@ import { DataflowNotebookModel } from './model';
                           }
                         }
                         inputVarsMetadata.tag_refs = tag_refs;
-                        notebook.cells.get(index).setMetadata('inputVars', inputVarsMetadata);
+                        dfmetadata.inputVars = inputVarsMetadata;
                       }
 
                       if(content.persistent_code[cId] || content.identifier_refs[cId]){
@@ -149,8 +145,9 @@ import { DataflowNotebookModel } from './model';
                           const out = c.outputs.get(i);
                           cellOutputTags.push(out.metadata['output_tag'] as string);
                         }
-                        notebook.cells.get(index).setMetadata('outputVars', cellOutputTags);
+                        dfmetadata.outputVars = cellOutputTags;
                       }
+                      notebook.cells.get(index).setMetadata('dfmetadata', dfmetadata);
                     }
                   }
                 }
@@ -249,7 +246,7 @@ import { DataflowNotebookModel } from './model';
     const cellIdModelMap: { [key: string]: any } = {};
     const outputTags: { [key: string]: string[] } = {};
     const inputTags: { [key: string]: string } = {};
-    const allRefs: { [key: string]: {[key: string] : string[]}} = {};
+    const allRefs: { [key: string]: {[key: string] : string[]} } = {};
     if (notebook) {
       for (let index = 0; index < notebook.cells.length; index++) {
         const cAny = notebook.cells.get(index);
@@ -257,16 +254,16 @@ import { DataflowNotebookModel } from './model';
             const c = cAny as ICodeCellModel;
             // FIXME replace with utility function (see dfcells/widget)
             const cId = c.id.replace(/-/g, '').substring(0, 8);
-            const inputTag = c.getMetadata('tag');
+            const dfmetadata = c.getMetadata('dfmetadata');
+            const inputTag = dfmetadata.tag;
             if (inputTag) {
-              // FIXME need to check for duplicates!
               inputTags[inputTag as string] = cId;
             }
             codeDict[cId] = c.sharedModel.getSource();
             cellIdModelMap[cId] = c;
-            outputTags[cId] = c.getMetadata('outputVars')
-            allRefs[cId] = c.getMetadata('inputVars');
-            persistedCode[cId] = c.getMetadata('persistentCode')
+            outputTags[cId] = dfmetadata.outputVars
+            allRefs[cId] = dfmetadata.inputVars;
+            persistedCode[cId] = dfmetadata.persistentCode;
         }
       };
     }

@@ -121,6 +121,18 @@ function setOutputArea(cell: CodeCell) {
   cell._output = dfOutput;
 }
 
+function setDFMetadata(cell: CodeCell) {
+  if (!cell.model.getMetadata('dfmetadata')){
+    const dfmetadata = {
+      tag: "",
+      inputVars: { ref: {}, tag_refs: {} },
+      outputVars: {},
+      persistentCode: ""
+    };
+    cell.model.setMetadata('dfmetadata', dfmetadata);
+  }
+}
+
 export class DataflowCell<T extends ICellModel = ICellModel> extends Cell<T> {
   protected initializeDOM(): void {
     super.initializeDOM();
@@ -152,6 +164,9 @@ export class DataflowMarkdownCell extends MarkdownCell {
     super.initializeDOM();
     setInputArea(this);
     this.addClass('df-cell');
+    if(this.model.getMetadata('dfmetadata')){
+      this.model.deleteMetadata('dfmetadata')
+    }
   }
 }
 
@@ -160,6 +175,9 @@ export class DataflowRawCell extends RawCell {
     super.initializeDOM();
     setInputArea(this);
     this.addClass('df-cell');
+    if(this.model.getMetadata('dfmetadata')){
+      this.model.deleteMetadata('dfmetadata')
+    }
   }
 }
 
@@ -180,6 +198,7 @@ export class DataflowCodeCell extends CodeCell {
     setOutputArea(this);
     this.setPromptToId();
     this.addClass('df-cell');
+    setDFMetadata(this);
   }
 
   public setPromptToId() {

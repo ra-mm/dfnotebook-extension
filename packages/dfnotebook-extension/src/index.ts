@@ -716,14 +716,16 @@ class ToggleTagsWidget extends Widget {
 
       for (let index = 0; index < notebook.widgets.length; index++){
         const cAny = notebook.widgets[index];
-        if (cAny.model.type == 'code' && cAny.model.metadata.tag){
+        const dfmetadata = cAny.model.getMetadata('dfmetadata');
+        if (cAny.model.type == 'code' && dfmetadata.tag){
           const inputArea = (cAny as any).inputArea;
-          let currTag = cAny.model.metadata.tag;
+          let currTag = dfmetadata.tag;
           if (isChecked){
-            inputArea.addTag(cAny.model.metadata.tag);
+            inputArea.addTag(currTag);
           } else{
             inputArea.addTag("");
-            cAny.model.setMetadata('tag', currTag);
+            dfmetadata.tag = currTag;
+            cAny.model.setMetadata('dfmetadata', dfmetadata);
           }
         }
       }
@@ -2666,7 +2668,11 @@ function addCommands(
       let cells = tracker.currentWidget?.content.model?.cells;
       if (cells){
         for (let index = 0; index < cells.length; index++) {
-          existingCellTags.add(cells.get(index).metadata.tag);
+          const dfmetadata = cells.get(index).getMetadata('dfmetadata');
+          const cellTagvalue = dfmetadata.tag;
+          if(cellTagvalue){
+            existingCellTags.add(cellTagvalue);
+          }
         }
       }
 
@@ -2760,7 +2766,11 @@ function addCommands(
       let cells = tracker.currentWidget?.content.model?.cells;
       if (cells){
         for (let index = 0; index < cells.length; index++) {
-          existingCellTags.add(cells.get(index).metadata.tag);
+          const dfmetadata = cells.get(index).getMetadata('dfmetadata');
+          const cellTagvalue = dfmetadata.tag;
+          if(cellTagvalue){
+            existingCellTags.add(cellTagvalue);
+          }
         }
       }
 
@@ -2877,8 +2887,9 @@ function addCommands(
             if (notebook.cells.get(index).type === 'code') {
               const c = cAny as ICodeCellModel;
               const cId = c.id.replace(/-/g, '').substring(0, 8);
-              if (c.getMetadata('tag')){
-                all_tags[cId] = c.getMetadata('tag');
+              const dfmetadata = c.getMetadata('dfmetadata');
+              if (dfmetadata.tag){
+                all_tags[cId] = dfmetadata.tag;
               }
             }
           }
@@ -2886,7 +2897,8 @@ function addCommands(
           for (let index = 0; index < notebook.cells.length; index++) {
             const cAny = notebook.cells.get(index) as ICodeCellModel;
             if (cAny.type == 'code') {
-              let inputVarsMetadata = notebook.cells.get(index).sharedModel.metadata.inputVars;
+              const dfmetadata = notebook.cells.get(index).getMetadata('dfmetadata');
+              let inputVarsMetadata = dfmetadata.inputVars;
               if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
                 const refValue = inputVarsMetadata.ref as { [key: string]: any };
                 const tagRefValue: { [key: string]: any } = {};
@@ -2895,8 +2907,8 @@ function addCommands(
                     tagRefValue[ref_key] = all_tags[ref_key];
                   }
                 }
-                inputVarsMetadata = { 'ref': refValue, 'tag_refs': tagRefValue};
-                notebook.cells.get(index).sharedModel.setMetadata('inputVars', inputVarsMetadata);
+                dfmetadata.inputVars = { 'ref': refValue, 'tag_refs': tagRefValue };
+                notebook.cells.get(index).setMetadata('dfmetadata', dfmetadata);
               }
             }
           }
@@ -2944,8 +2956,9 @@ function updateNotebookCells(notebook: DataflowNotebookModel, cellUUID: string, 
         if (notebook.cells.get(index).type === 'code') {
           const c = cAny as ICodeCellModel;
           const cId = c.id.replace(/-/g, '').substring(0, 8);
-          if (c.getMetadata('tag')) {
-            all_tags[cId] = c.getMetadata('tag');
+          const dfmetadata = c.getMetadata('dfmetadata');
+          if (dfmetadata.tag) {
+            all_tags[cId] = dfmetadata.tag;
           }
         }
       }
@@ -2957,7 +2970,8 @@ function updateNotebookCells(notebook: DataflowNotebookModel, cellUUID: string, 
           if(content.code_dict?.hasOwnProperty(cId)){
             notebook.cells.get(index).sharedModel.setSource((content.code_dict as { [key: string]: any })[cId]);
           }
-          let inputVarsMetadata = notebook.cells.get(index).sharedModel.metadata.inputVars;
+          const dfmetadata = notebook.cells.get(index).getMetadata('dfmetadata');
+          let inputVarsMetadata = dfmetadata.inputVars;
           if (inputVarsMetadata && typeof inputVarsMetadata === 'object' && 'ref' in inputVarsMetadata) {
             const refValue = inputVarsMetadata.ref as { [key: string]: any };
             let tagRefValue = inputVarsMetadata.tag_refs as { [key: string]: any };
@@ -2966,8 +2980,8 @@ function updateNotebookCells(notebook: DataflowNotebookModel, cellUUID: string, 
                 tagRefValue[cellUUID] = all_tags[cellUUID];
               }
             }
-            inputVarsMetadata = { 'ref': refValue, 'tag_refs': tagRefValue };
-            notebook.cells.get(index).sharedModel.setMetadata('inputVars', inputVarsMetadata);
+            dfmetadata.inputVars = { 'ref': refValue, 'tag_refs': tagRefValue };
+            notebook.cells.get(index).setMetadata('dfmetadata', dfmetadata);
           }
         }
       }
