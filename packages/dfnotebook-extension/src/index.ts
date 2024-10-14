@@ -100,6 +100,9 @@ import { CellBarExtension } from '@jupyterlab/cell-toolbar';
 import { Widget } from '@lumino/widgets';
 import tagSvgstr from '../style/tag.svg';
 
+//codemirror
+import { dfeditorPlugin } from '@dfnotebook/dfeditor';
+
 export const tagIcon = new LabIcon({
   name: 'tag',
   svgstr: tagSvgstr
@@ -546,7 +549,7 @@ const DepViewer: JupyterFrontEndPlugin<void> = {
           // Add the command to the palette.
           palette.addItem({ command, category: 'Tutorial' });
         }
-    };
+};
 
 // /**
 //  * Initialization data for the Minimap extension.
@@ -771,7 +774,8 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   DepViewer,
   MiniMap,
   GraphManagerPlugin,
-  ToggleTags
+  ToggleTags,
+  dfeditorPlugin
 ];
 export default plugins;
 

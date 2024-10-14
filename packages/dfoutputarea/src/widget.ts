@@ -10,7 +10,7 @@ import { Kernel, KernelMessage } from '@jupyterlab/services';
 import * as nbformat from '@jupyterlab/nbformat';
 import { JSONObject } from '@lumino/coreutils';
 import { Panel, Widget } from '@lumino/widgets';
-
+import { contextMenu } from '@dfnotebook/dfeditor';
 
 export interface IStreamWithExecCountMsg extends KernelMessage.IStreamMsg {
   content: {
@@ -28,8 +28,6 @@ export interface IErrorWithExecCountMsg extends KernelMessage.IErrorMsg {
     execution_count?: number | null;
   };
 }
-
-
 
 export class DataflowOutputArea extends OutputArea {
   constructor(options: OutputArea.IOptions, cellId: string) {
@@ -133,9 +131,14 @@ export class DataflowOutputArea extends OutputArea {
 }
 
 export class DataflowOutputPrompt extends OutputPrompt {
+  
   updatePrompt() {
     if (this._outputTag) {
-      this.node.textContent = `${this._outputTag}:`;
+      this.node.textContent="";
+      this._tagSpan = this._createTagSpan();
+      this._tagSpan.textContent = `${this._outputTag}:`;
+      this.node.append(this._tagSpan);
+      //this.node.textContent = `${this._outputTag}:`;
     } else if (this.executionCount === null) {
       this.node.textContent = '';
     } else {
@@ -145,9 +148,20 @@ export class DataflowOutputPrompt extends OutputPrompt {
     }
   }
 
+  private _createTagSpan(): HTMLSpanElement {
+    const tagSpan = document.createElement('span');
+    tagSpan.className = 'dataflow-output-tag';
+    tagSpan.style.cursor = 'pointer';
+    tagSpan.addEventListener('mouseover', this._onMouseOver);
+    tagSpan.addEventListener('mouseout', this._onMouseOut);
+    tagSpan.addEventListener('click', this._onClick);
+    return tagSpan;
+  }
+  
   get executionCount(): nbformat.ExecutionCount {
     return super.executionCount;
   }
+
   set executionCount(value: nbformat.ExecutionCount) {
     super.executionCount = value;
     this.updatePrompt();
@@ -162,7 +176,32 @@ export class DataflowOutputPrompt extends OutputPrompt {
     this.updatePrompt();
   }
 
+  private _onMouseOver = () => {
+    if (this._tagSpan) {
+      this._tagSpan.style.color = '#0A31FF';
+    }
+  };
+
+  private _onMouseOut = () => {
+    if (this._tagSpan) {
+      this._tagSpan.style.color = ''; // Reset to default color
+    }
+  };
+
+  private _onClick = (event: MouseEvent) => {
+    event.stopPropagation(); // Prevent the default collapse/expand behavior
+    contextMenu(event, this._outputTag, "local")
+  };
+
   private _outputTag: string = '';
+  private _tagSpan: HTMLSpanElement;
+
+  // dispose() {
+  //   this._tagSpan.removeEventListener('mouseover', this._onMouseOver);
+  //   this._tagSpan.removeEventListener('mouseout', this._onMouseOut);
+  //   this._tagSpan.removeEventListener('click', this._onClick);
+  //   super.dispose();
+  //}
 }
 
 export namespace DataflowOutputArea {
